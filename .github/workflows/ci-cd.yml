@@ -7,8 +7,9 @@ on:
     branches: [ main, devsecops-pipeline ]
 
 jobs:
-  build-and-test-and-sast:
+  build-and-security-checks:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -28,14 +29,29 @@ jobs:
           fi
           pip install pytest mock
 
-      - name: Run our tests (isolated from project config)
-        # -c /dev/null отключает чтение pytest.ini, чтобы избежать конфликтов плагинов
+      - name: Run our tests (isolated)
         run: pytest -c /dev/null test_example.py
 
+      # --- SAST: Semgrep (поиск уязвимостей в коде) ---
       - name: Install Semgrep
         run: pipx install semgrep
 
-      - name: Run Semgrep SAST scan
+      - name: Run SAST with Semgrep
+        # Политика fail-fast: если есть ERROR — пайплайн падает
         run: semgrep scan --config auto --error
-        # --config auto: используем встроенные правила Semgrep (поиск SQLi, XSS, hardcoded secrets и т.п.)
-        # --error: если найдены проблемы уровня ERROR/CRITICAL — пайплайн падает (exit code 1)
+
+      # --- SCA: Trivy (поиск CVE в зависимостях) ---
+      - name: Install Trivy
+        run: curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+
+      - name: Run SCA with Trivy (dependencies)
+        # Сканируем всю файловую систему проекта, смотрим только CRITICAL и HIGH
+        run: trivy fs --exit-code 1 --severity CRITICAL,HIGH .
+
+      # --- Secret Detection: Gitleaks (поиск секретов) ---
+      - name: Install Gitleaks
+        run: curl -sSL https://raw.githubusercontent.com/gitleaks/gitleaks/master/install.sh | sudo bash
+
+      - name: Scan for secrets with Gitleaks
+        # Ищем секреты в файлах и истории Git
+        run: gitleaks detect --severity HIGH --exit-code 1
