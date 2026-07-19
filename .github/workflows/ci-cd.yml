@@ -26,8 +26,8 @@ jobs:
           else
             pip install .
           fi
-          # Эти пакеты нужны, чтобы тесты Kotti запустились
-          pip install pytest mock
+          # Добавляем всё, что нужно для запуска тестов Kotti
+          pip install pytest mock pytest-flake8 pytest-cov
 
       - name: Run tests
         run: pytest
