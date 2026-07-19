@@ -26,7 +26,8 @@ jobs:
           else
             pip install .
           fi
-          pip install pytest
+          # Эти пакеты нужны, чтобы тесты Kotti запустились
+          pip install pytest mock
 
       - name: Run tests
         run: pytest
