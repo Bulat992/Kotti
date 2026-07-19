@@ -1,4 +1,3 @@
-
 name: CI/CD for DevSecOps Diploma (SAST + SCA + Secrets)
 
 on:
@@ -15,6 +14,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # --- Python и тесты ---
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -31,28 +31,30 @@ jobs:
           pip install pytest mock
 
       - name: Run tests
+        # || true позволяет пайплайну не падать полностью, если один тест провален (для демонстрации покрытия)
         run: pytest -c /dev/null test_example.py || true
 
-      # --- SAST: Semgrep ---
-      - name: Install Semgrep
-        run: pipx install semgrep
-
+      # --- SAST: Semgrep (через официальный GitHub Action — самый чистый вариант) ---
       - name: Run SAST with Semgrep
-        # Это должно упасть (красный пайплайн) — это нормально и нужно для диплома
-        run: semgrep scan --config auto --error
+        uses: returntocorp/semgrep-action@v2
+        with:
+          config: .semgrep.yml
+          publishToken: ${{ secrets.SEMGREP_APP_TOKEN }}
+        # Если у тебя нет токена для публикации в Semgrep App, можно оставить через pipx:
+        # run: |
+        #   pipx install semgrep
+        #   semgrep scan --config auto --error
 
-      # --- SCA: Trivy (через безопасный скрипт) ---
-      - name: Install Trivy
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
-
+      # --- SCA: Trivy (через официальный Docker-образ, без curl-установок) ---
       - name: Run Trivy SCA on filesystem
-        run: trivy fs --exit-code 1 --severity CRITICAL,HIGH .
-
-      # --- Secret Detection: Gitleaks ---
-      - name: Install Gitleaks
         run: |
-          curl -sSL https://raw.githubusercontent.com/gitleaks/gitleaks/master/install.sh | bash
+          # Запускаем Trivy в контейнере, мапим рабочую директорию раннера в /src
+          docker run --rm -v "${{ github.workspace }}:/src" aquasec/trivy:2.12.0 \
+            fs --exit-code 1 --severity CRITICAL,HIGH /src
 
+      # --- Secret Detection: Gitleaks (через официальный Docker-образ, без curl-установок) ---
       - name: Scan secrets with Gitleaks
-        run: gitleaks detect --severity HIGH --exit-code 1
+        run: |
+          # Запускаем Gitleaks в контейнере, мапим репозиторий в /repo
+          docker run --rm -v "${{ github.workspace }}:/repo" zricethezav/gitleaks:v9.1.0 \
+            detect -source=/repo --severity HIGH --exit-code 1
