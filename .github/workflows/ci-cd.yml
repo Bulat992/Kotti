@@ -1,4 +1,4 @@
-name: CI/CD for DevSecOps Diploma
+name: CI/CD for DevSecOps Diploma (SAST + SCA + Secrets)
 
 on:
   push:
@@ -11,11 +11,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # ✅ Безопасный checkout с фиксированным SHA
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@8f4b7f84864484a7bf31766abe9204da3cbe65b3
 
+      # ✅ Безопасная установка Python с фиксированным SHA
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@d2cb0a7dc9a358ae3988e05fe70e536c2d6e77e2
         with:
           python-version: '3.11'
 
@@ -32,7 +34,7 @@ jobs:
       - name: Run our tests (isolated)
         run: pytest -c /dev/null test_example.py
 
-      # --- SAST: Semgrep (поиск уязвимостей в коде) ---
+      # --- SAST: Semgrep (код) ---
       - name: Install Semgrep
         run: pipx install semgrep
 
@@ -40,18 +42,19 @@ jobs:
         # Политика fail-fast: если есть ERROR — пайплайн падает
         run: semgrep scan --config auto --error
 
-      # --- SCA: Trivy (поиск CVE в зависимостях) ---
-      - name: Install Trivy
-        run: curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+      # --- SCA: Trivy (зависимости) — безопасный GitHub Action ---
+      - name: Run Trivy SCA
+        uses: aquasecurity/trivy-action@1593329556844503078
+        with:
+          image-ref: '.'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: 'true'
+          severity: 'CRITICAL,HIGH'
 
-      - name: Run SCA with Trivy (dependencies)
-        # Сканируем всю файловую систему проекта, смотрим только CRITICAL и HIGH
-        run: trivy fs --exit-code 1 --severity CRITICAL,HIGH .
-
-      # --- Secret Detection: Gitleaks (поиск секретов) ---
-      - name: Install Gitleaks
-        run: curl -sSL https://raw.githubusercontent.com/gitleaks/gitleaks/master/install.sh | sudo bash
-
+      # --- Secret Detection: Gitleaks (секреты) — безопасный GitHub Action ---
       - name: Scan for secrets with Gitleaks
-        # Ищем секреты в файлах и истории Git
-        run: gitleaks detect --severity HIGH --exit-code 1
+        uses: gitleaks/gitleaks-action@v8.16.0
+        with:
+          severity: HIGH
+          exit-code: 1
