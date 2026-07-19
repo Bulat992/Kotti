@@ -4,10 +4,10 @@ on:
   push:
     branches: [ devsecops-pipeline ]
   pull_request:
-    branches: [ devsecops-pipeline ]
+    branches: [ main, devsecops-pipeline ]
 
 jobs:
-  build-and-test:
+  build-and-test-and-sast:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -28,5 +28,14 @@ jobs:
           fi
           pip install pytest mock
 
-      - name: Run our tests
+      - name: Run our tests (isolated from project config)
+        # -c /dev/null отключает чтение pytest.ini, чтобы избежать конфликтов плагинов
         run: pytest -c /dev/null test_example.py
+
+      - name: Install Semgrep
+        run: pipx install semgrep
+
+      - name: Run Semgrep SAST scan
+        run: semgrep scan --config auto --error
+        # --config auto: используем встроенные правила Semgrep (поиск SQLi, XSS, hardcoded secrets и т.п.)
+        # --error: если найдены проблемы уровня ERROR/CRITICAL — пайплайн падает (exit code 1)
