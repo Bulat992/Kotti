@@ -12,11 +12,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ✅ Безопасный checkout (GitHub сам подставит SHA для v4)
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # ✅ Безопасная установка Python (GitHub сам подставит SHA для v5)
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -32,30 +30,29 @@ jobs:
           fi
           pip install pytest mock
 
-      - name: Run our tests (isolated)
+      - name: Run tests
         run: pytest -c /dev/null test_example.py || true
 
-      # --- SAST: Semgrep (код) ---
+      # --- SAST: Semgrep ---
       - name: Install Semgrep
         run: pipx install semgrep
 
       - name: Run SAST with Semgrep
-        # Политика fail-fast: если есть ERROR — пайплайн падает
+        # Это должно упасть (красный пайплайн) — это нормально и нужно для диплома
         run: semgrep scan --config auto --error
 
-      # --- SCA: Trivy (зависимости) — через официальный Action (рабочий) ---
-      - name: Run Trivy SCA
-        uses: aquasecurity/trivy-action@0.13.0
-        with:
-          image-ref: '.'
-          format: 'table'
-          exit-code: '1'
-          ignore-unfixed: 'true'
-          severity: 'CRITICAL,HIGH'
+      # --- SCA: Trivy (через безопасный скрипт) ---
+      - name: Install Trivy
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
 
-      # --- Secret Detection: Gitleaks (секреты) — через официальный Action (рабочий) ---
-      - name: Scan for secrets with Gitleaks
-        uses: gitleaks/gitleaks-action@v9.0.0
-        with:
-          severity: HIGH
-          exit-code: 1
+      - name: Run Trivy SCA on filesystem
+        run: trivy fs --exit-code 1 --severity CRITICAL,HIGH .
+
+      # --- Secret Detection: Gitleaks ---
+      - name: Install Gitleaks
+        run: |
+          curl -sSL https://raw.githubusercontent.com/gitleaks/gitleaks/master/install.sh | bash
+
+      - name: Scan secrets with Gitleaks
+        run: gitleaks detect --severity HIGH --exit-code 1
