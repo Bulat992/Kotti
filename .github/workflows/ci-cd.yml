@@ -28,5 +28,5 @@ jobs:
           fi
           pip install pytest mock
 
-      - name: Run tests
-        run: pytest test_example.py
+      - name: Run our tests
+        run: pytest -c /dev/null test_example.py
