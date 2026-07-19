@@ -31,30 +31,25 @@ jobs:
           pip install pytest mock
 
       - name: Run tests
-        # || true позволяет пайплайну не падать полностью, если один тест провален (для демонстрации покрытия)
         run: pytest -c /dev/null test_example.py || true
 
-      # --- SAST: Semgrep (через официальный GitHub Action — самый чистый вариант) ---
-      - name: Run SAST with Semgrep
-        uses: returntocorp/semgrep-action@v2
-        with:
-          config: .semgrep.yml
-          publishToken: ${{ secrets.SEMGREP_APP_TOKEN }}
-        # Если у тебя нет токена для публикации в Semgrep App, можно оставить через pipx:
-        # run: |
-        #   pipx install semgrep
-        #   semgrep scan --config auto --error
+      # --- SAST: Semgrep (через pipx, без GitHub Action) ---
+      # Это решает ошибку "unable to find version v2"
+      - name: Install Semgrep
+        run: pipx install semgrep
 
-      # --- SCA: Trivy (через официальный Docker-образ, без curl-установок) ---
+      - name: Run SAST with Semgrep
+        # --error делает пайплайн красным при нахождении уязвимостей — это правильно для диплома
+        run: semgrep scan --config auto --error
+
+      # --- SCA: Trivy (через официальный Docker-образ) ---
       - name: Run Trivy SCA on filesystem
         run: |
-          # Запускаем Trivy в контейнере, мапим рабочую директорию раннера в /src
           docker run --rm -v "${{ github.workspace }}:/src" aquasec/trivy:2.12.0 \
             fs --exit-code 1 --severity CRITICAL,HIGH /src
 
-      # --- Secret Detection: Gitleaks (через официальный Docker-образ, без curl-установок) ---
+      # --- Secret Detection: Gitleaks (через официальный Docker-образ) ---
       - name: Scan secrets with Gitleaks
         run: |
-          # Запускаем Gitleaks в контейнере, мапим репозиторий в /repo
           docker run --rm -v "${{ github.workspace }}:/repo" zricethezav/gitleaks:v9.1.0 \
             detect -source=/repo --severity HIGH --exit-code 1
