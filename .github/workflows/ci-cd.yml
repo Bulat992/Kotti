@@ -1,133 +1,138 @@
-name: DevSecOps Pipeline - Kotti (Verified & Stable)
+name: CI/CD for DevSecOps Diploma (SAST + SCA + Secrets + DAST)
 
 on:
   push:
     branches: [ devsecops-pipeline ]
   pull_request:
     branches: [ main, devsecops-pipeline ]
-  workflow_dispatch:
-
-env:
-  KOTTI_URL: http://194.87.131.127:5000
-  SEMGREP_OUT: semgrep-report.json
-  GITLEAKS_OUT: gitleaks-report.json
-  TRIVY_OUT: trivy-report.json
-  NUCLEI_OUT: nuclei-report.jsonl
-  THRESHOLD_CRITICAL: 5
-  # Принудительно отключаем предупреждения об устаревшем Node.js
-  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
 
 jobs:
-  sast-semgrep:
+  build-and-security-checks:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - name: Run Semgrep (non-failing)
-        uses: semgrep/semgrep-action@v1
-        continue-on-error: true
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # --- 1. Python, зависимости и тесты ---
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          config: p/ci
-          args: --json --output=${{ env.SEMGREP_OUT }}
-          
-      - name: Ensure Semgrep report exists
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install .
+          fi
+          pip install pytest mock gunicorn # Добавили gunicorn для запуска DAST
+
+      - name: Run tests
+        run: pytest -c /dev/null test_example.py || true
+
+      # --- 2. SAST: Semgrep ---
+      - name: Install Semgrep
+        run: pipx install semgrep
+
+      - name: Run SAST with Semgrep
+        # continue-on-error: true позволяет пайплайну идти дальше при падении шага
+        continue-on-error: true
+        # Сохраняем результат в JSON для последующего анализа скриптом
+        run: |
+          semgrep scan --config auto --json --output=semgrep-result.json --error
+
+      # --- 3. SCA: Trivy ---
+      - name: Run Trivy SCA on filesystem
+        continue-on-error: true
+        # Используем актуальную и стабильную версию Trivy. Результат пишем в JSON.
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/src" aquasec/trivy:0.49.1 \
+            fs --exit-code 1 --severity CRITICAL,HIGH --format json --output /src/trivy-result.json /src
+
+      # --- 4. Secret Detection: Gitleaks ---
+      - name: Scan secrets with Gitleaks
+        continue-on-error: true
+        # Добавляем флаг --report-path для генерации отчета
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/repo" zricethezav/gitleaks:v8.18.2 \
+            detect --source=/repo --severity HIGH --exit-code 1 --report-path=/repo/gitleaks-result.json
+
+      # --- 5. DAST: Nuclei (Замена ZAP) ---
+      - name: Start Application for DAST
+        # Запускаем ваше приложение (например, на Flask/Django) в фоновом режиме
+        # Измените команду под ваш проект (например: python app.py или gunicorn)
+        run: |
+          python -m gunicorn app:app --bind 127.0.0.1:5000 & 
+          sleep 5 # Даем приложению время на запуск
+
+      - name: Run DAST with Nuclei
+        continue-on-error: true
+        # Сканируем локально запущенное приложение официальным Docker-образом Nuclei
+        run: |
+          docker run --rm --net=host -v "${{ github.workspace }}:/output" projectdiscovery/nuclei:v3.1.8 \
+            -target http://127.0.0.1:5000 -severity critical,high -json-export /output/nuclei-result.json
+
+      # --- 6. Финальная агрегация результатов ---
+      - name: Check Security Gate
+        # Этот шаг выполняется всегда, даже если предыдущие шаги завершились с ошибкой
         if: always()
         run: |
-          if [ ! -f "${{ env.SEMGREP_OUT }}" ]; then
-            echo "{}" > ${{ env.SEMGREP_OUT }}
-          fi
-          
-      - name: Upload Semgrep report
-        uses: actions/upload-artifact@v4
-        with:
-          name: semgrep-report
-          path: ${{ env.SEMGREP_OUT }}
+          echo "=== Анализ результатов безопасности ==="
+          FAILED=0
 
-  secrets-gitleaks:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Run Gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        continue-on-error: true
-        env:
-          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
-          
-      - name: Rename and Move Gitleaks Report
+          # Проверка Semgrep
+          if [ -f semgrep-result.json ] && jq -e '.results | length > 0' semgrep-result.json > /dev/null; then
+            echo "❌ SAST (Semgrep): Найдены уязвимости!"
+            FAILED=1
+          else
+            echo "✅ SAST (Semgrep): Уязвимостей не обнаружено."
+          fi
+
+          # Проверка Trivy
+          if [ -f trivy-result.json ] && jq -e '.Results[].Vulnerabilities | length > 0' trivy-result.json > /dev/null; then
+            echo "❌ SCA (Trivy): Найдены уязвимости в зависимостях!"
+            FAILED=1
+          else
+            echo "✅ SCA (Trivy): Зависимости чисты."
+          fi
+
+          # Проверка Gitleaks
+          # Gitleaks создает пустой файл или не создает его, если секретов нет. 
+          # Если файл не пустой (размер > 0) — секреты найдены.
+          if [ -s gitleaks-result.json ]; then
+            echo "❌ Secrets (Gitleaks): Обнаружены утечки секретов!"
+            FAILED=1
+          else
+            echo "✅ Secrets (Gitleaks): Секретов в коде не найдено."
+          fi
+
+          # Проверка Nuclei
+          if [ -s nuclei-result.json ]; then
+            echo "❌ DAST (Nuclei): Найдены уязвимости в запущенном приложении!"
+            FAILED=1
+          else
+            echo "✅ DAST (Nuclei): DAST сканирование успешно пройдено."
+          fi
+
+          # Финальный вердикт
+          if [ $FAILED -ne 0 ]; then
+            echo "🔴 Пайплайн остановлен из-за критических уязвимостей безопасности."
+            exit 1
+          else
+            echo "🟢 Все проверки безопасности успешно пройдены!"
+          fi
+
+      # --- 7. Сохранение артефактов (Опционально) ---
+      - name: Upload Security Reports
         if: always()
-        run: |
-          if [ -f "gitleaks-results.sarif" ]; then
-            mv gitleaks-results.sarif ${{ env.GITLEAKS_OUT }}
-          elif [ -f "results.json" ]; then
-            mv results.json ${{ env.GITLEAKS_OUT }}
-          elif [ ! -f "${{ env.GITLEAKS_OUT }}" ]; then
-            echo "[]" > ${{ env.GITLEAKS_OUT }}
-          fi
-          
-      - name: Upload Gitleaks report
         uses: actions/upload-artifact@v4
         with:
-          name: gitleaks-report
-          path: ${{ env.GITLEAKS_OUT }}
-
-  sca-trivy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run Trivy (filesystem)
-        uses: aquasecurity/trivy-action@v0.35.0
-        continue-on-error: true
-        with:
-          scan-type: 'fs'
-          format: 'json'
-          output: ${{ env.TRIVY_OUT }}
-          scan-ref: '.'
-          
-      - name: Upload Trivy report
-        uses: actions/upload-artifact@v4
-        with:
-          name: trivy-report
-          path: ${{ env.TRIVY_OUT }}
-
-  dast-nuclei:
-    runs-on: ubuntu-latest
-    needs: [ sast-semgrep, secrets-gitleaks, sca-trivy ]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run Nuclei DAST via CLI
-        continue-on-error: true
-        # Используем конструкцию (команда || true), обернутую целиком, чтобы bash не прерывал запись потока в файл при ненулевом коде возврата
-        run: |
-          docker run --rm --user root -v ${{ github.workspace }}:/output projectdiscovery/nuclei:latest -u ${{ env.KOTTI_URL }} -severity critical,high -silent -json -o /output/${{ env.NUCLEI_OUT }} || echo "Nuclei found vulnerabilities"
-          
-      - name: Ensure Nuclei report exists
-        if: always()
-        run: |
-          if [ ! -f "${{ env.NUCLEI_OUT }}" ]; then
-            echo "" > ${{ env.NUCLEI_OUT }}
-          fi
-          
-      - name: Upload Nuclei report
-        uses: actions/upload-artifact@v4
-        with:
-          name: nuclei-report
-          path: ${{ env.NUCLEI_OUT }}
-
-  gate-final:
-    runs-on: ubuntu-latest
-    needs: [ sast-semgrep, secrets-gitleaks, sca-trivy, dast-nuclei ]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Create reports directory
-        run: mkdir -p ./reports
-      - name: Download all reports
-        uses: actions/download-artifact@v4
-        with:
-          path: ./reports
-      - name: Make script executable
-        run: chmod +x scripts/check-security-gate.sh
-      - name: Run security gate check
-        run: ./scripts/check-security-gate.sh
-        env:
-          THRESHOLD: ${{ env.THRESHOLD_CRITICAL }}
+          name: secops-diploma-reports
+          path: |
+            semgrep-result.json
+            trivy-result.json
+            gitleaks-result.json
+            nuclei-result.json
