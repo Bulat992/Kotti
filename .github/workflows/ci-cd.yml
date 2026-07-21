@@ -1,4 +1,4 @@
-yamlname: DevSecOps Pipeline - Kotti (Verified & Stable)
+name: DevSecOps Pipeline - Kotti (Verified & Stable)
 
 on:
   push:
