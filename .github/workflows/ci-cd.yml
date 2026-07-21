@@ -1,4 +1,4 @@
-name: DevSecOps Pipeline - Kotti (Verified Stable Versions)
+name: DevSecOps Pipeline - Kotti (Verified & Stable)
 
 on:
   push:
@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run Semgrep (non-failing)
-        uses: returntocorp/semgrep-action@v2.17.0
+        uses: returntocorp/semgrep-action@v2
         continue-on-error: true
         with:
           publish: false
@@ -54,7 +54,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run Trivy (filesystem)
-        uses: aquasecurity/trivy-action@0.12.0
+        uses: aquasecurity/trivy-action@0.13.0
         continue-on-error: true
         with:
           scan-type: 'fs'
