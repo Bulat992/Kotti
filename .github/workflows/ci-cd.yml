@@ -1,4 +1,4 @@
-name: DevSecOps Pipeline - Kotti (Full Run + Security Gate)
+name: DevSecOps Pipeline - Kotti (Stable Versions)
 
 on:
   push:
@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run Semgrep (non-failing)
-        uses: returntocorp/semgrep-action@v2.18.0
+        uses: returntocorp/semgrep-action@main
         continue-on-error: true
         with:
           publish: false
@@ -37,8 +37,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Gitleaks запускаем как обычный экшен, без контейнера — это стабильнее
       - name: Run Gitleaks
-        uses: zricethezav/gitleaks@v8.18.2
+        uses: zricethezav/gitleaks@main
         continue-on-error: true
         with:
           report-format: json
@@ -54,7 +55,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run Trivy (filesystem)
-        uses: aquasecurity/trivy-action@0.14.0
+        uses: aquasecurity/trivy-action@main
         continue-on-error: true
         with:
           scan-type: 'fs'
