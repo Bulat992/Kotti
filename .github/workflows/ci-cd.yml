@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run Semgrep (non-failing)
-        uses: returntocorp/semgrep-action@v2
+        uses: returntocorp/semgrep-action@v2.18.0
         continue-on-error: true
         with:
           publish: false
@@ -38,7 +38,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run Gitleaks
-        uses: zricethezav/gitleaks@v8
+        uses: zricethezav/gitleaks@v8.18.2
         continue-on-error: true
         with:
           report-format: json
@@ -54,7 +54,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run Trivy (filesystem)
-        uses: aquasecurity/trivy-action@0.9.0
+        uses: aquasecurity/trivy-action@0.14.0
         continue-on-error: true
         with:
           scan-type: 'fs'
@@ -70,12 +70,10 @@ jobs:
   dast-nuclei:
     runs-on: ubuntu-latest
     needs: [ sast-semgrep, secrets-gitleaks, sca-trivy ]
+    container:
+      image: projectdiscovery/nuclei:latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Nuclei
-        run: |
-          curl -sfL https://raw.githubusercontent.com/projectdiscovery/nuclei/master/install.sh | sh -s -- -b /usr/local/bin
-          nuclei -version
       - name: Run Nuclei DAST
         continue-on-error: true
         run: nuclei -u ${{ env.KOTTI_URL }} -severity critical,high -silent -json > ${{ env.NUCLEI_OUT }} || true
