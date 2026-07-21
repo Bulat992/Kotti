@@ -1,4 +1,4 @@
-name: DevSecOps Pipeline - Kotti (Verified & Stable)
+yamlname: DevSecOps Pipeline - Kotti (Verified & Stable)
 
 on:
   push:
@@ -23,15 +23,15 @@ jobs:
         uses: semgrep/semgrep-action@v1
         continue-on-error: true
         with:
-          # Для оригинального semgrep-action аргументы генерации JSON передаются в блок args
           config: p/ci
-          args: --json --output=${{ env.SEMGREP_OUT }}
+          # Используем переменную GITHUB_WORKSPACE, чтобы отчет лег в корень ранера
+          args: --json --output=${{ github.workspace }}/${{ env.SEMGREP_OUT }}
           
       - name: Upload Semgrep report
         uses: actions/upload-artifact@v4
         with:
           name: semgrep-report
-          path: ${{ env.SEMGREP_OUT }}
+          path: ${{ github.workspace }}/${{ env.SEMGREP_OUT }}
 
   secrets-gitleaks:
     runs-on: ubuntu-latest
@@ -40,39 +40,38 @@ jobs:
         with:
           fetch-depth: 0
       - name: Run Gitleaks
-        # Используем безопасную v2, которая теперь адаптирована под Node 24
         uses: gitleaks/gitleaks-action@v2
         continue-on-error: true
+        with:
+          # Официальный экшен gitleaks принимает путь через параметр report-path напрямую
+          report-path: ${{ github.workspace }}/${{ env.GITLEAKS_OUT }}
         env:
-          # Оригинальный gitleaks-action принимает кастомные аргументы только через переменную GITLEAKS_ARGS
-          GITLEAKS_ARGS: detect --verbose --format=json --report-path=${{ env.GITLEAKS_OUT }}
           GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
           
       - name: Upload Gitleaks report
         uses: actions/upload-artifact@v4
         with:
           name: gitleaks-report
-          path: ${{ env.GITLEAKS_OUT }}
+          path: ${{ github.workspace }}/${{ env.GITLEAKS_OUT }}
 
   sca-trivy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Run Trivy (filesystem)
-        # Версия 0.35.0 гарантированно существует и безопасна после инцидентов 2026 года
         uses: aquasecurity/trivy-action@v0.35.0
         continue-on-error: true
         with:
           scan-type: 'fs'
           format: 'json'
-          output: ${{ env.TRIVY_OUT }}
+          output: ${{ github.workspace }}/${{ env.TRIVY_OUT }}
           scan-ref: '.'
           
       - name: Upload Trivy report
         uses: actions/upload-artifact@v4
         with:
           name: trivy-report
-          path: ${{ env.TRIVY_OUT }}
+          path: ${{ github.workspace }}/${{ env.TRIVY_OUT }}
 
   dast-nuclei:
     runs-on: ubuntu-latest
@@ -83,12 +82,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run Nuclei DAST
         continue-on-error: true
-        run: nuclei -u ${{ env.KOTTI_URL }} -severity critical,high -silent -json > ${{ env.NUCLEI_OUT }} || true
+        run: nuclei -u ${{ env.KOTTI_URL }} -severity critical,high -silent -json > ${{ github.workspace }}/${{ env.NUCLEI_OUT }} || true
       - name: Upload Nuclei report
         uses: actions/upload-artifact@v4
         with:
           name: nuclei-report
-          path: ${{ env.NUCLEI_OUT }}
+          path: ${{ github.workspace }}/${{ env.NUCLEI_OUT }}
 
   gate-final:
     runs-on: ubuntu-latest
