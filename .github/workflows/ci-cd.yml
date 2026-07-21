@@ -5,13 +5,10 @@ on:
     branches: [ devsecops-pipeline ]
   pull_request:
     branches: [ main, devsecops-pipeline ]
+  workflow_dispatch:
 
 env:
   KOTTI_URL: http://194.87.131.127:5000
-  SEMGREP_OUT: semgrep-report.json
-  GITLEAKS_OUT: gitleaks-report.json
-  TRIVY_OUT: trivy-report.json
-  NUCLEI_OUT: nuclei-report.jsonl
   THRESHOLD_CRITICAL: 5
 
 jobs:
@@ -24,14 +21,23 @@ jobs:
         continue-on-error: true
         with:
           config: p/ci
-          # Используем переменную GITHUB_WORKSPACE, чтобы отчет лег в корень ранера
-          args: --json --output=${{ github.workspace }}/${{ env.SEMGREP_OUT }}
+          # Генерируем стандартный SARIF-отчет, который нативно поддерживается экшеном
+          generateSarif: "1"
+          
+      - name: Rename and Move Semgrep Report
+        if: always()
+        run: |
+          if [ -f "semgrep.sarif" ]; then
+            mv semgrep.sarif semgrep-report.json
+          else
+            echo "{}" > semgrep-report.json
+          fi
           
       - name: Upload Semgrep report
         uses: actions/upload-artifact@v4
         with:
           name: semgrep-report
-          path: ${{ github.workspace }}/${{ env.SEMGREP_OUT }}
+          path: semgrep-report.json
 
   secrets-gitleaks:
     runs-on: ubuntu-latest
@@ -42,17 +48,26 @@ jobs:
       - name: Run Gitleaks
         uses: gitleaks/gitleaks-action@v2
         continue-on-error: true
-        with:
-          # Официальный экшен gitleaks принимает путь через параметр report-path напрямую
-          report-path: ${{ github.workspace }}/${{ env.GITLEAKS_OUT }}
         env:
           GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+          
+      - name: Rename and Move Gitleaks Report
+        if: always()
+        run: |
+          # gitleaks-action по умолчанию генерирует файл результатов в корень с именем результаты.json/gitleaks-report.json или через дефолтный стейдж
+          if [ -f "gitleaks-report.json" ]; then
+            echo "Report found"
+          elif [ -f "results.json" ]; then
+            mv results.json gitleaks-report.json
+          else
+            echo "[]" > gitleaks-report.json
+          fi
           
       - name: Upload Gitleaks report
         uses: actions/upload-artifact@v4
         with:
           name: gitleaks-report
-          path: ${{ github.workspace }}/${{ env.GITLEAKS_OUT }}
+          path: gitleaks-report.json
 
   sca-trivy:
     runs-on: ubuntu-latest
@@ -64,30 +79,30 @@ jobs:
         with:
           scan-type: 'fs'
           format: 'json'
-          output: ${{ github.workspace }}/${{ env.TRIVY_OUT }}
+          output: 'trivy-report.json'
           scan-ref: '.'
           
       - name: Upload Trivy report
         uses: actions/upload-artifact@v4
         with:
           name: trivy-report
-          path: ${{ github.workspace }}/${{ env.TRIVY_OUT }}
+          path: trivy-report.json
 
   dast-nuclei:
     runs-on: ubuntu-latest
     needs: [ sast-semgrep, secrets-gitleaks, sca-trivy ]
-    container:
-      image: projectdiscovery/nuclei:latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run Nuclei DAST
+      - name: Run Nuclei DAST via CLI
         continue-on-error: true
-        run: nuclei -u ${{ env.KOTTI_URL }} -severity critical,high -silent -json > ${{ github.workspace }}/${{ env.NUCLEI_OUT }} || true
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/output projectdiscovery/nuclei:latest -u ${{ env.KOTTI_URL }} -severity critical,high -silent -json -o /output/nuclei-report.jsonl || true
+          
       - name: Upload Nuclei report
         uses: actions/upload-artifact@v4
         with:
           name: nuclei-report
-          path: ${{ github.workspace }}/${{ env.NUCLEI_OUT }}
+          path: nuclei-report.jsonl
 
   gate-final:
     runs-on: ubuntu-latest
