@@ -20,13 +20,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run Semgrep (non-failing)
-        uses: returntocorp/semgrep-action@v2
+        uses: semgrep/semgrep-action@v1
         continue-on-error: true
         with:
           publish: false
           sarif: false
           output: ${{ env.SEMGREP_OUT }}
-          config: .semgrep/rules
+          config: p/ci
+          
       - name: Upload Semgrep report
         uses: actions/upload-artifact@v4
         with:
@@ -37,12 +38,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run Gitleaks
-        uses: zricethezav/gitleaks@v8.18.2
-        continue-on-error: true
         with:
-          report-format: json
+          fetch-depth: 0
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        continue-on-error: true
+        env:
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }} # Оставьте пустым, если репозиторий публичный
+        with:
+          format: json
           report-path: ${{ env.GITLEAKS_OUT }}
+          
       - name: Upload Gitleaks report
         uses: actions/upload-artifact@v4
         with:
@@ -54,13 +60,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run Trivy (filesystem)
-        uses: aquasecurity/trivy-action@0.13.0
+        uses: aquasecurity/trivy-action@0.28.0
         continue-on-error: true
         with:
           scan-type: 'fs'
           format: 'json'
           output: ${{ env.TRIVY_OUT }}
-          path: '.'
+          scan-ref: '.'
+          
       - name: Upload Trivy report
         uses: actions/upload-artifact@v4
         with:
