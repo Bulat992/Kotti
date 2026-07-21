@@ -13,6 +13,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Важно для Gitleaks, чтобы он видел историю коммитов
 
       # --- 1. Python, зависимости и тесты ---
       - name: Set up Python
@@ -39,25 +41,25 @@ jobs:
 
       - name: Run SAST with Semgrep
         continue-on-error: true
-        # Флаг --force гарантирует запись JSON-отчета, даже если сканирование завершилось ошибкой
+        # Убираем --error, добавляем явный вывод в файл. Semgrep сам создаст нужный JSON.
         run: |
-          semgrep scan --config auto --json --output semgrep-result.json --force
+          semgrep scan --config auto --json --output=semgrep-result.json
 
       # --- 3. SCA: Trivy ---
       - name: Run Trivy SCA on filesystem
         continue-on-error: true
-        # Передаем текущего пользователя хоста внутри Docker (--user), чтобы избежать ошибки 126
+        # Запуск под root, чтобы гарантировать создание файла, права исправим ниже
         run: |
-          docker run --rm --user "$(id -u):$(id -g)" -v "${{ github.workspace }}:/src" aquasec/trivy:0.49.1 \
+          docker run --rm -v "${{ github.workspace }}:/src" aquasec/trivy:0.49.1 \
             fs --severity CRITICAL,HIGH --format json --output /src/trivy-result.json /src
 
       # --- 4. Secret Detection: Gitleaks ---
       - name: Scan secrets with Gitleaks
         continue-on-error: true
-        # Запуск от текущего пользователя + корректный путь сохранения отчета
+        # Переопределяем entrypoint, чтобы принудительно сказать Git, что папка /repo безопасна
         run: |
-          docker run --rm --user "$(id -u):$(id -g)" -v "${{ github.workspace }}:/repo" zricethezav/gitleaks:v8.18.2 \
-            detect --source=/repo --severity HIGH --report-path=/repo/gitleaks-result.json
+          docker run --rm -v "${{ github.workspace }}:/repo" --entrypoint /bin/sh zricethezav/gitleaks:v8.18.2 \
+            -c "git config --global --add safe.directory /repo && gitleaks detect --source=/repo --severity HIGH --report-path=/repo/gitleaks-result.json"
 
       # --- 5. DAST: Nuclei ---
       - name: Start Application for DAST
@@ -67,22 +69,22 @@ jobs:
 
       - name: Run DAST with Nuclei
         continue-on-error: true
-        # Запуск от текущего пользователя, отчет сохраняется напрямую в примонтированную папку
         run: |
-          docker run --rm --net=host --user "$(id -u):$(id -g)" -v "${{ github.workspace }}:/output" projectdiscovery/nuclei:v3.1.8 \
+          docker run --rm --net=host -v "${{ github.workspace }}:/output" projectdiscovery/nuclei:v3.1.8 \
             -target http://127.0.0.1:5000 -severity critical,high -json-export /output/nuclei-result.json
 
       # --- 6. Финальная агрегация результатов ---
       - name: Check Security Gate
         if: always()
         run: |
+          echo "=== Исправление прав на отчеты ==="
+          # Docker создал файлы под root. Возвращаем права текущему пользователю runner, чтобы шаги GitHub Actions увидели файлы.
+          sudo chmod -R 777 ${{ github.workspace }}/*-result.json 2>/dev/null || true
+
           echo "=== Анализ результатов безопасности ==="
           FAILED=0
 
-          # Показываем содержимое для отладки в консоли GitHub Actions
-          ls -la *-result.json || true
-
-          # Проверка Semgrep: ищем непустой массив "results" в JSON
+          # Проверка Semgrep
           if [ -f semgrep-result.json ] && grep -q '"results": *\[[^]]' semgrep-result.json 2>/dev/null; then
             echo "❌ SAST (Semgrep): Найдены уязвимости в коде!"
             FAILED=1
@@ -90,7 +92,7 @@ jobs:
             echo "✅ SAST (Semgrep): Проверка пройдена."
           fi
 
-          # Проверка Trivy: ищем непустой массив "Vulnerabilities"
+          # Проверка Trivy
           if [ -f trivy-result.json ] && grep -q '"Vulnerabilities": *\[[^]]' trivy-result.json 2>/dev/null; then
             echo "❌ SCA (Trivy): Найдены уязвимости в зависимостях!"
             FAILED=1
@@ -98,7 +100,7 @@ jobs:
             echo "✅ SCA (Trivy): Проверка пройдена."
           fi
 
-          # Проверка Gitleaks: утилита создает валидный JSON-массив, если секреты найдены (размер файла > 5 байт)
+          # Проверка Gitleaks
           if [ -s gitleaks-result.json ] && [ $(wc -c < gitleaks-result.json) -gt 5 ]; then
             echo "❌ Secrets (Gitleaks): Обнаружены утечки секретов!"
             FAILED=1
@@ -106,7 +108,7 @@ jobs:
             echo "✅ Secrets (Gitleaks): Проверка пройдена."
           fi
 
-          # Проверка Nuclei: файл создается только при наличии уязвимостей
+          # Проверка Nuclei
           if [ -s nuclei-result.json ]; then
             echo "❌ DAST (Nuclei): Найдены уязвимости в запущенном приложении!"
             FAILED=1
@@ -122,7 +124,7 @@ jobs:
             echo "🟢 Все проверки безопасности успешно пройдены!"
           fi
 
-      # --- 7. Сохранение артефактов (Отчеты можно скачать из интерфейса GitHub) ---
+      # --- 7. Сохранение артефактов ---
       - name: Upload Security Reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -133,4 +135,4 @@ jobs:
             trivy-result.json
             gitleaks-result.json
             nuclei-result.json
-          if-no-files-found: ignore
+          if-no-files-found: warn
