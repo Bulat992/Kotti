@@ -9,7 +9,7 @@ on:
 
 env:
   KOTTI_URL: http://194.87.131.127:5000
-  SEMGREP_OUT: semgrep-report.txt
+  SEMGREP_OUT: semgrep-report.json
   GITLEAKS_OUT: gitleaks-report.json
   TRIVY_OUT: trivy-report.json
   NUCLEI_OUT: nuclei-report.jsonl
