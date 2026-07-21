@@ -23,10 +23,9 @@ jobs:
         uses: semgrep/semgrep-action@v1
         continue-on-error: true
         with:
-          publish: false
-          sarif: false
-          output: ${{ env.SEMGREP_OUT }}
+          # Для оригинального semgrep-action аргументы генерации JSON передаются в блок args
           config: p/ci
+          args: --json --output=${{ env.SEMGREP_OUT }}
           
       - name: Upload Semgrep report
         uses: actions/upload-artifact@v4
@@ -41,13 +40,13 @@ jobs:
         with:
           fetch-depth: 0
       - name: Run Gitleaks
+        # Используем безопасную v2, которая теперь адаптирована под Node 24
         uses: gitleaks/gitleaks-action@v2
         continue-on-error: true
         env:
-          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }} # Оставьте пустым, если репозиторий публичный
-        with:
-          format: json
-          report-path: ${{ env.GITLEAKS_OUT }}
+          # Оригинальный gitleaks-action принимает кастомные аргументы только через переменную GITLEAKS_ARGS
+          GITLEAKS_ARGS: detect --verbose --format=json --report-path=${{ env.GITLEAKS_OUT }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
           
       - name: Upload Gitleaks report
         uses: actions/upload-artifact@v4
@@ -60,7 +59,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run Trivy (filesystem)
-        uses: aquasecurity/trivy-action@0.28.0
+        # Версия 0.35.0 гарантированно существует и безопасна после инцидентов 2026 года
+        uses: aquasecurity/trivy-action@v0.35.0
         continue-on-error: true
         with:
           scan-type: 'fs'
