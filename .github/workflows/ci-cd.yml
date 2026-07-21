@@ -42,8 +42,8 @@ jobs:
       - name: Install Semgrep
         run: pipx install semgrep
 
-      # Запускаем сканирование, пишем результат в файл. Если код возврата не 0, создаем маркер ошибки
-       Pentesting
+      # Ошибка исправлена: лишний текст "Pentesting" удален, шаг оформлен правильно
+      - name: Run SAST with Semgrep
         run: |
           semgrep scan --config auto --error > semgrep-report.txt 2>&1 || echo "failed" > semgrep-status.txt
 
@@ -105,7 +105,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Замените URL на адрес вашего тестируемого приложения (например, http://localhost:8000)
       - name: Run Nuclei DAST Scan
         run: |
           docker run --rm -v "${{ github.workspace }}:/app" projectdiscovery/nuclei:v3.1.0 \
@@ -124,7 +123,7 @@ jobs:
   pipeline-gatekeeper:
     runs-on: ubuntu-latest
     needs: [ tests, sast-semgrep, sca-trivy, secrets-gitleaks, dast-nuclei ]
-    if: always() # Выполняется гарантированно, даже если предыдущие шаги нашли уязвимости
+    if: always()
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -137,7 +136,6 @@ jobs:
           echo "📊 СБОР И ВЫВОД ОТЧЕТОВ БЕЗОПАСНОСТИ"
           echo "===================================================="
           
-          # Показываем отчет Semgrep
           echo -e "\n🔍 [1/4] ОТЧЕТ SAST: SEMGREP"
           echo "----------------------------------------------------"
           if [ -f semgrep-artifacts/semgrep-report.txt ]; then
@@ -147,7 +145,6 @@ jobs:
           fi
           if [ -f semgrep-artifacts/semgrep-status.txt ]; then FAILED=1; fi
           
-          # Показываем отчет Trivy
           echo -e "\n📦 [2/4] ОТЧЕТ SCA: TRIVY"
           echo "----------------------------------------------------"
           if [ -f trivy-artifacts/trivy-report.txt ]; then
@@ -157,7 +154,6 @@ jobs:
           fi
           if [ -f trivy-artifacts/trivy-status.txt ]; then FAILED=1; fi
           
-          # Показываем отчет Gitleaks
           echo -e "\n🔑 [3/4] ОТЧЕТ SECRETS: GITLEAKS"
           echo "----------------------------------------------------"
           if [ -f gitleaks-artifacts/gitleaks-report.txt ]; then
@@ -167,7 +163,6 @@ jobs:
           fi
           if [ -f gitleaks-artifacts/gitleaks-status.txt ]; then FAILED=1; fi
 
-          # Показываем отчет Nuclei
           echo -e "\n🌐 [4/4] ОТЧЕТ DAST: NUCLEI"
           echo "----------------------------------------------------"
           if [ -f nuclei-artifacts/nuclei-report.txt ]; then
