@@ -13,15 +13,12 @@ env:
   TRIVY_OUT: trivy-report.json
   NUCLEI_OUT: nuclei-report.jsonl
   THRESHOLD_CRITICAL: 5
-  # Фиксированные SHA для действий (чтобы Semgrep не считал их уязвимостями)
-  CHECKOUT_SHA: 7e2a9a8c3b1d5e7f9a3c5d7e9b1a3c5d7e9b1a3c5d7e9b1a3c5d7e9b1a3c5d7e
-  SETUP_PYTHON_SHA: a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2
 
 jobs:
   sast-semgrep:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@${{ env.CHECKOUT_SHA }}
+      - uses: actions/checkout@v4
       - name: Run Semgrep (non-failing)
         uses: returntocorp/semgrep-action@v2
         continue-on-error: true
@@ -35,13 +32,11 @@ jobs:
         with:
           name: semgrep-report
           path: ${{ env.SEMGREP_OUT }}
-      - name: Show summary (for logs)
-        run: echo "Semgrep completed. Report saved as ${{ env.SEMGREP_OUT }}"
 
   secrets-gitleaks:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@${{ env.CHECKOUT_SHA }}
+      - uses: actions/checkout@v4
       - name: Run Gitleaks
         uses: zricethezav/gitleaks@v8
         continue-on-error: true
@@ -57,7 +52,7 @@ jobs:
   sca-trivy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@${{ env.CHECKOUT_SHA }}
+      - uses: actions/checkout@v4
       - name: Run Trivy (filesystem)
         uses: aquasecurity/trivy-action@0.9.0
         continue-on-error: true
@@ -76,7 +71,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [ sast-semgrep, secrets-gitleaks, sca-trivy ]
     steps:
-      - uses: actions/checkout@${{ env.CHECKOUT_SHA }}
+      - uses: actions/checkout@v4
       - name: Install Nuclei
         run: |
           curl -sfL https://raw.githubusercontent.com/projectdiscovery/nuclei/master/install.sh | sh -s -- -b /usr/local/bin
@@ -94,7 +89,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [ sast-semgrep, secrets-gitleaks, sca-trivy, dast-nuclei ]
     steps:
-      - uses: actions/checkout@${{ env.CHECKOUT_SHA }}
+      - uses: actions/checkout@v4
       - name: Create reports directory
         run: mkdir -p ./reports
       - name: Download all reports
