@@ -9,6 +9,10 @@ on:
 
 env:
   KOTTI_URL: http://194.87.131.127:5000
+  SEMGREP_OUT: semgrep-report.json
+  GITLEAKS_OUT: gitleaks-report.json
+  TRIVY_OUT: trivy-report.json
+  NUCLEI_OUT: nuclei-report.jsonl
   THRESHOLD_CRITICAL: 5
 
 jobs:
@@ -21,23 +25,21 @@ jobs:
         continue-on-error: true
         with:
           config: p/ci
-          # Генерируем стандартный SARIF-отчет, который нативно поддерживается экшеном
-          generateSarif: "1"
+          # Передаем аргументы вывода строго через блок args, как требует CLI
+          args: --json --output=${{ env.SEMGREP_OUT }}
           
-      - name: Rename and Move Semgrep Report
+      - name: Ensure Semgrep report exists
         if: always()
         run: |
-          if [ -f "semgrep.sarif" ]; then
-            mv semgrep.sarif semgrep-report.json
-          else
-            echo "{}" > semgrep-report.json
+          if [ ! -f "${{ env.SEMGREP_OUT }}" ]; then
+            echo "{}" > ${{ env.SEMGREP_OUT }}
           fi
           
       - name: Upload Semgrep report
         uses: actions/upload-artifact@v4
         with:
           name: semgrep-report
-          path: semgrep-report.json
+          path: ${{ env.SEMGREP_OUT }}
 
   secrets-gitleaks:
     runs-on: ubuntu-latest
@@ -54,20 +56,19 @@ jobs:
       - name: Rename and Move Gitleaks Report
         if: always()
         run: |
-          # gitleaks-action по умолчанию генерирует файл результатов в корень с именем результаты.json/gitleaks-report.json или через дефолтный стейдж
-          if [ -f "gitleaks-report.json" ]; then
-            echo "Report found"
+          if [ -f "gitleaks-results.sarif" ]; then
+            mv gitleaks-results.sarif ${{ env.GITLEAKS_OUT }}
           elif [ -f "results.json" ]; then
-            mv results.json gitleaks-report.json
-          else
-            echo "[]" > gitleaks-report.json
+            mv results.json ${{ env.GITLEAKS_OUT }}
+          elif [ ! -f "${{ env.GITLEAKS_OUT }}" ]; then
+            echo "[]" > ${{ env.GITLEAKS_OUT }}
           fi
           
       - name: Upload Gitleaks report
         uses: actions/upload-artifact@v4
         with:
           name: gitleaks-report
-          path: gitleaks-report.json
+          path: ${{ env.GITLEAKS_OUT }}
 
   sca-trivy:
     runs-on: ubuntu-latest
@@ -79,30 +80,31 @@ jobs:
         with:
           scan-type: 'fs'
           format: 'json'
-          output: 'trivy-report.json'
+          output: ${{ env.TRIVY_OUT }}
           scan-ref: '.'
           
       - name: Upload Trivy report
         uses: actions/upload-artifact@v4
         with:
           name: trivy-report
-          path: trivy-report.json
+          path: ${{ env.TRIVY_OUT }}
 
   dast-nuclei:
     runs-on: ubuntu-latest
     needs: [ sast-semgrep, secrets-gitleaks, sca-trivy ]
     steps:
       - uses: actions/checkout@v4
-      - name: Run Nuclei DAST via CLI
+      - name: Run Nuclei DAST via CLI (with Root permissions)
         continue-on-error: true
         run: |
-          docker run --rm -v ${{ github.workspace }}:/output projectdiscovery/nuclei:latest -u ${{ env.KOTTI_URL }} -severity critical,high -silent -json -o /output/nuclei-report.jsonl || true
+          # Запуск под пользователем root (--user root) решает проблему записи отчета на хост-систему ранера
+          docker run --rm --user root -v ${{ github.workspace }}/:/output projectdiscovery/nuclei:latest -u ${{ env.KOTTI_URL }} -severity critical,high -silent -json -o /output/${{ env.NUCLEI_OUT }} || true
           
       - name: Upload Nuclei report
         uses: actions/upload-artifact@v4
         with:
           name: nuclei-report
-          path: nuclei-report.jsonl
+          path: ${{ env.NUCLEI_OUT }}
 
   gate-final:
     runs-on: ubuntu-latest
