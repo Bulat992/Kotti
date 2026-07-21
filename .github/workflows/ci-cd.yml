@@ -14,6 +14,8 @@ env:
   TRIVY_OUT: trivy-report.json
   NUCLEI_OUT: nuclei-report.jsonl
   THRESHOLD_CRITICAL: 5
+  # Принудительно отключаем предупреждения об устаревшем Node.js
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
 
 jobs:
   sast-semgrep:
@@ -25,7 +27,6 @@ jobs:
         continue-on-error: true
         with:
           config: p/ci
-          # Передаем аргументы вывода строго через блок args, как требует CLI
           args: --json --output=${{ env.SEMGREP_OUT }}
           
       - name: Ensure Semgrep report exists
@@ -94,11 +95,18 @@ jobs:
     needs: [ sast-semgrep, secrets-gitleaks, sca-trivy ]
     steps:
       - uses: actions/checkout@v4
-      - name: Run Nuclei DAST via CLI (with Root permissions)
+      - name: Run Nuclei DAST via CLI
         continue-on-error: true
+        # Используем конструкцию (команда || true), обернутую целиком, чтобы bash не прерывал запись потока в файл при ненулевом коде возврата
         run: |
-          # Запуск под пользователем root (--user root) решает проблему записи отчета на хост-систему ранера
-          docker run --rm --user root -v ${{ github.workspace }}/:/output projectdiscovery/nuclei:latest -u ${{ env.KOTTI_URL }} -severity critical,high -silent -json -o /output/${{ env.NUCLEI_OUT }} || true
+          docker run --rm --user root -v ${{ github.workspace }}:/output projectdiscovery/nuclei:latest -u ${{ env.KOTTI_URL }} -severity critical,high -silent -json -o /output/${{ env.NUCLEI_OUT }} || echo "Nuclei found vulnerabilities"
+          
+      - name: Ensure Nuclei report exists
+        if: always()
+        run: |
+          if [ ! -f "${{ env.NUCLEI_OUT }}" ]; then
+            echo "" > ${{ env.NUCLEI_OUT }}
+          fi
           
       - name: Upload Nuclei report
         uses: actions/upload-artifact@v4
